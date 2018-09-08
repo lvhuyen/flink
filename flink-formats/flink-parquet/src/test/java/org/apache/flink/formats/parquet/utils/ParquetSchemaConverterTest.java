@@ -88,13 +88,13 @@ public class ParquetSchemaConverterTest extends TestUtil {
 
 	@Test
 	public void testSimpleRowTypeConversion() {
-		MessageType simpleSchema = ParquetSchemaConverter.toParquetType(simplyRowType);
+		MessageType simpleSchema = ParquetSchemaConverter.toParquetType(simplyRowType, new MessageType(null , SIMPLE_TYPES));
 		assertEquals(Arrays.asList(SIMPLE_TYPES), simpleSchema.getFields());
 	}
 
 	@Test
 	public void testNestedRowTypeConversion() {
-		MessageType nestedSchema = ParquetSchemaConverter.toParquetType(nestedRowType);
+		MessageType nestedSchema = ParquetSchemaConverter.toParquetType(nestedRowType, new MessageType(null , NESTED_TYPES));
 		assertEquals(Arrays.asList(NESTED_TYPES), nestedSchema.getFields());
 	}
 }

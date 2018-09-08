@@ -20,6 +20,8 @@ package org.apache.flink.formats.parquet.utils;
 
 import org.apache.flink.api.common.typeinfo.BasicArrayTypeInfo;
 import org.apache.flink.api.common.typeinfo.BasicTypeInfo;
+import org.apache.flink.api.common.typeinfo.PrimitiveArrayTypeInfo;
+import org.apache.flink.api.common.typeinfo.SqlTimeTypeInfo;
 import org.apache.flink.api.common.typeinfo.TypeInformation;
 import org.apache.flink.api.java.typeutils.MapTypeInfo;
 import org.apache.flink.api.java.typeutils.ObjectArrayTypeInfo;
@@ -31,7 +33,6 @@ import org.apache.parquet.schema.MessageType;
 import org.apache.parquet.schema.OriginalType;
 import org.apache.parquet.schema.PrimitiveType;
 import org.apache.parquet.schema.Type;
-import org.apache.parquet.schema.Types;
 
 import java.lang.reflect.Array;
 import java.util.ArrayList;
@@ -51,8 +52,8 @@ public class ParquetSchemaConverter {
 		return convertFields(type.getFields());
 	}
 
-	public static MessageType toParquetType(TypeInformation<?> typeInformation) {
-		return (MessageType) convertField(null, typeInformation, Type.Repetition.OPTIONAL);
+	public static MessageType toParquetType(TypeInformation<?> typeInformation, MessageType ref) {
+		return (MessageType) convertField(null, typeInformation, Type.Repetition.OPTIONAL, ref);
 	}
 
 	private static TypeInformation<?> convertFields(List<Type> parquetFields) {
@@ -76,28 +77,60 @@ public class ParquetSchemaConverter {
 			PrimitiveType primitiveType = fieldType.asPrimitiveType();
 			switch (primitiveType.getPrimitiveTypeName()) {
 				case BINARY:
-					typeInfo = BasicTypeInfo.STRING_TYPE_INFO;
+				case FIXED_LEN_BYTE_ARRAY:
+					if (primitiveType.getOriginalType() != null) {
+						switch (primitiveType.getOriginalType()) {
+							case UTF8:
+								typeInfo = BasicTypeInfo.STRING_TYPE_INFO;
+								break;
+							case DECIMAL:
+								typeInfo = BasicTypeInfo.BIG_DEC_TYPE_INFO;
+								break;
+							default:
+								typeInfo = PrimitiveArrayTypeInfo.BYTE_PRIMITIVE_ARRAY_TYPE_INFO;
+						}
+					} else {
+						typeInfo = PrimitiveArrayTypeInfo.BYTE_PRIMITIVE_ARRAY_TYPE_INFO;
+					}
 					break;
 				case BOOLEAN:
 					typeInfo = BasicTypeInfo.BOOLEAN_TYPE_INFO;
 					break;
 				case INT32:
-					typeInfo = BasicTypeInfo.INT_TYPE_INFO;
+					if (primitiveType.getOriginalType() != null
+						&& primitiveType.getOriginalType() == OriginalType.DATE) {
+						typeInfo = SqlTimeTypeInfo.DATE;
+					} else {
+						typeInfo = BasicTypeInfo.INT_TYPE_INFO;
+					}
 					break;
 				case INT64:
-					typeInfo = BasicTypeInfo.LONG_TYPE_INFO;
+					if (primitiveType.getOriginalType() != null) {
+						switch (primitiveType.getOriginalType()) {
+							case TIMESTAMP_MILLIS:
+								typeInfo = BasicTypeInfo.DATE_TYPE_INFO;
+								break;
+							case TIMESTAMP_MICROS:
+								typeInfo = BasicTypeInfo.INSTANT_TYPE_INFO;
+								break;
+							default:
+								typeInfo = BasicTypeInfo.LONG_TYPE_INFO;
+						}
+					} else {
+						typeInfo = BasicTypeInfo.LONG_TYPE_INFO;
+					}
 					break;
 				case INT96:
-					typeInfo = BasicTypeInfo.BIG_INT_TYPE_INFO;
+					// https://issues.apache.org/jira/browse/PARQUET-323
+					// INT96 is only used for storing timestamp, and is deprecated.
+					// Here it will be converted to MICROSECS in a java.sql.Timestamp
+					typeInfo = BasicTypeInfo.INSTANT_TYPE_INFO;
 					break;
 				case FLOAT:
 					typeInfo = BasicTypeInfo.FLOAT_TYPE_INFO;
 					break;
 				case DOUBLE:
 					typeInfo = BasicTypeInfo.DOUBLE_TYPE_INFO;
-					break;
-				case FIXED_LEN_BYTE_ARRAY:
-					typeInfo = BasicTypeInfo.STRING_TYPE_INFO;
 					break;
 				default:
 					throw new UnsupportedOperationException("Unsupported schema: " + fieldType);
@@ -158,67 +191,60 @@ public class ParquetSchemaConverter {
 		return typeInfo;
 	}
 
-	private static Type convertField(String fieldName, TypeInformation<?> typeInfo, Type.Repetition inheritRepetition) {
+	private static Type convertField(String fieldName, TypeInformation<?> typeInfo, Type.Repetition inheritRepetition, Type ref) {
 		Type fieldType = null;
 
 		Type.Repetition repetition = inheritRepetition == null ? Type.Repetition.OPTIONAL : inheritRepetition;
-		if (typeInfo.isBasicType()) {
-			BasicTypeInfo basicTypeInfo = (BasicTypeInfo) typeInfo;
-			if (basicTypeInfo.equals(BasicTypeInfo.BIG_DEC_TYPE_INFO)) {
-				fieldType = Types.primitive(PrimitiveType.PrimitiveTypeName.DOUBLE, repetition).named(fieldName);
-			} else if (basicTypeInfo.equals(BasicTypeInfo.BIG_INT_TYPE_INFO)) {
-				fieldType = Types.primitive(PrimitiveType.PrimitiveTypeName.INT96, repetition).named(fieldName);
-			} else if (basicTypeInfo.equals(BasicTypeInfo.INT_TYPE_INFO)) {
-				fieldType = Types.primitive(PrimitiveType.PrimitiveTypeName.INT32, repetition).named(fieldName);
-			} else if (basicTypeInfo.equals(BasicTypeInfo.DOUBLE_TYPE_INFO)) {
-				fieldType = Types.primitive(PrimitiveType.PrimitiveTypeName.DOUBLE, repetition).named(fieldName);
-			} else if (basicTypeInfo.equals(BasicTypeInfo.FLOAT_TYPE_INFO)) {
-				fieldType = Types.primitive(PrimitiveType.PrimitiveTypeName.FLOAT, repetition).named(fieldName);
-			} else if (basicTypeInfo.equals(BasicTypeInfo.LONG_TYPE_INFO)) {
-				fieldType = Types.primitive(PrimitiveType.PrimitiveTypeName.INT64, repetition).named(fieldName);
-			} else if (basicTypeInfo.equals(BasicTypeInfo.SHORT_TYPE_INFO)) {
-				fieldType = Types.primitive(PrimitiveType.PrimitiveTypeName.INT32, repetition).named(fieldName);
-			} else if (basicTypeInfo.equals(BasicTypeInfo.BYTE_TYPE_INFO)) {
-				fieldType = Types.primitive(PrimitiveType.PrimitiveTypeName.BINARY, repetition).named(fieldName);
-			} else if (basicTypeInfo.equals(BasicTypeInfo.CHAR_TYPE_INFO)) {
-				fieldType = Types.primitive(PrimitiveType.PrimitiveTypeName.BINARY, repetition).named(fieldName);
-			} else if (basicTypeInfo.equals(BasicTypeInfo.BOOLEAN_TYPE_INFO)) {
-				fieldType = Types.primitive(PrimitiveType.PrimitiveTypeName.BOOLEAN, repetition).named(fieldName);
-			} else if (basicTypeInfo.equals(BasicTypeInfo.DATE_TYPE_INFO)
-				|| basicTypeInfo.equals(BasicTypeInfo.STRING_TYPE_INFO)) {
-				fieldType = Types.primitive(PrimitiveType.PrimitiveTypeName.BINARY, repetition)
-					.as(OriginalType.UTF8)
-					.named(fieldName);
-			}
-		} else if (typeInfo instanceof MapTypeInfo) {
-			MapTypeInfo mapTypeInfo = (MapTypeInfo) typeInfo;
-			fieldType = Types.optionalMap()
-				.key(convertField(MAP_KEY, mapTypeInfo.getKeyTypeInfo(), Type.Repetition.REQUIRED))
-				.value(convertField(MAP_VALUE, mapTypeInfo.getValueTypeInfo(), Type.Repetition.OPTIONAL))
-				.named(fieldName);
-		} else if (typeInfo instanceof ObjectArrayTypeInfo) {
-			ObjectArrayTypeInfo objectArrayTypeInfo = (ObjectArrayTypeInfo) typeInfo;
-			fieldType = Types.optionalGroup()
-				.addField(convertField(LIST_ELEMENT, objectArrayTypeInfo.getComponentInfo(), Type.Repetition.REPEATED))
-				.as(OriginalType.LIST)
-				.named(fieldName);
-		} else if (typeInfo instanceof BasicArrayTypeInfo) {
-			BasicArrayTypeInfo basicArrayType = (BasicArrayTypeInfo) typeInfo;
-			PrimitiveType.PrimitiveTypeName primitiveTypeName =
-				convertField(fieldName, basicArrayType.getComponentInfo(),
-					Type.Repetition.OPTIONAL).asPrimitiveType().getPrimitiveTypeName();
-			fieldType = Types.optionalGroup()
-				.repeated(primitiveTypeName).named(LIST_ELEMENT)
-				.as(OriginalType.LIST).named(fieldName);
+//		if (typeInfo.isBasicType()) {
+//			BasicTypeInfo basicTypeInfo = (BasicTypeInfo) typeInfo;
+//			if (basicTypeInfo.equals(BasicTypeInfo.BIG_DEC_TYPE_INFO)
+//				|| basicTypeInfo.equals(BasicTypeInfo.BIG_INT_TYPE_INFO)) {
+//				fieldType = Types.primitive(PrimitiveType.PrimitiveTypeName.BINARY, repetition).named(fieldName);
+//			} else if (basicTypeInfo.equals(BasicTypeInfo.INT_TYPE_INFO)) {
+//				fieldType = Types.primitive(PrimitiveType.PrimitiveTypeName.INT32, repetition).named(fieldName);
+//			} else if (basicTypeInfo.equals(BasicTypeInfo.DOUBLE_TYPE_INFO)) {
+//				fieldType = Types.primitive(PrimitiveType.PrimitiveTypeName.DOUBLE, repetition).named(fieldName);
+//			} else if (basicTypeInfo.equals(BasicTypeInfo.FLOAT_TYPE_INFO)) {
+//				fieldType = Types.primitive(PrimitiveType.PrimitiveTypeName.FLOAT, repetition).named(fieldName);
+//			} else if (basicTypeInfo.equals(BasicTypeInfo.LONG_TYPE_INFO)) {
+//				fieldType = Types.primitive(PrimitiveType.PrimitiveTypeName.INT64, repetition).named(fieldName);
+//			} else if (basicTypeInfo.equals(BasicTypeInfo.SHORT_TYPE_INFO)) {
+//				fieldType = new PrimitiveType(repetition, PrimitiveType.PrimitiveTypeName.INT32, fieldName, OriginalType.INT_16);
+//			} else if (basicTypeInfo.equals(BasicTypeInfo.BYTE_TYPE_INFO)) {
+//				fieldType = new PrimitiveType(repetition, PrimitiveType.PrimitiveTypeName.INT32, fieldName, OriginalType.INT_8);
+//			} else if (basicTypeInfo.equals(BasicTypeInfo.CHAR_TYPE_INFO)) {
+//				fieldType = new PrimitiveType(repetition, PrimitiveType.PrimitiveTypeName.INT32, fieldName, OriginalType.UINT_16);
+//			} else if (basicTypeInfo.equals(BasicTypeInfo.BOOLEAN_TYPE_INFO)) {
+//				fieldType = Types.primitive(PrimitiveType.PrimitiveTypeName.BOOLEAN, repetition).named(fieldName);
+//			} else if (basicTypeInfo.equals(BasicTypeInfo.DATE_TYPE_INFO)) {
+//				fieldType = new PrimitiveType(repetition, PrimitiveType.PrimitiveTypeName.INT64, fieldName, OriginalType.TIMESTAMP_MILLIS);
+//			} else if (basicTypeInfo.equals(BasicTypeInfo.STRING_TYPE_INFO)) {
+//				fieldType = new PrimitiveType(repetition, PrimitiveType.PrimitiveTypeName.BINARY, fieldName, OriginalType.UTF8);
+//			}
+//		} else if (typeInfo instanceof org.apache.flink.api.common.typeinfo.SqlTimeTypeInfo) {
+//			if (typeInfo.equals(SqlTimeTypeInfo.TIMESTAMP)) {
+//				fieldType = new PrimitiveType(repetition, PrimitiveType.PrimitiveTypeName.INT64, fieldName, OriginalType.TIMESTAMP_MICROS);
+//			} else {
+//				fieldType = new PrimitiveType(repetition, PrimitiveType.PrimitiveTypeName.INT64, fieldName, OriginalType.TIMESTAMP_MILLIS);
+//			}
+		if (typeInfo.isBasicType()
+			|| typeInfo instanceof SqlTimeTypeInfo
+			|| typeInfo instanceof MapTypeInfo
+			|| typeInfo instanceof ObjectArrayTypeInfo
+			|| typeInfo instanceof PrimitiveArrayTypeInfo
+			|| typeInfo instanceof BasicArrayTypeInfo) {
+			fieldType = ref;
 		} else {
 			RowTypeInfo rowTypeInfo = (RowTypeInfo) typeInfo;
 			List<Type> types = new ArrayList<>();
 			String[] fieldNames = rowTypeInfo.getFieldNames();
 			TypeInformation<?>[] fieldTypes = rowTypeInfo.getFieldTypes();
-			for (int i = 0; i < rowTypeInfo.getArity(); i++) {
-				types.add(convertField(fieldNames[i], fieldTypes[i], Type.Repetition.OPTIONAL));
-			}
 
+			GroupType currentRef = (GroupType) ref;
+			for (int i = 0; i < rowTypeInfo.getArity(); i++) {
+				types.add(convertField(fieldNames[i], fieldTypes[i], Type.Repetition.OPTIONAL,
+					currentRef.getFields().get(currentRef.getFieldIndex(fieldNames[i]))));
+			}
 			if (fieldName == null) {
 				fieldType = new MessageType(MESSAGE_ROOT, types);
 			} else {

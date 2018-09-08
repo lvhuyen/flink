@@ -42,6 +42,9 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
+import java.nio.ByteBuffer;
+import java.nio.ByteOrder;
+import java.time.Instant;
 
 /**
  * The base InputFormat class to read from Parquet files.
@@ -55,9 +58,16 @@ import java.io.IOException;
 public abstract class ParquetInputFormat<E> extends FileInputFormat<E> implements
 	CheckpointableInputFormat<FileInputSplit, Tuple2<Long, Long>> {
 
+	protected static final long JULIAN_EPOCH_OFFSET_DAYS = 2440588;
+
+	protected static final long SECONDS_IN_DAY = 24L * 3600;
+	protected static final long MILLIS_IN_DAY = 24L * 3600 * 1000;
+
 	private static final long serialVersionUID = 1L;
 
 	private static final Logger LOG = LoggerFactory.getLogger(ParquetInputFormat.class);
+
+	private static ByteBuffer byteBuffer = ByteBuffer.allocate(12).order(ByteOrder.LITTLE_ENDIAN);
 
 	private transient Counter recordConsumed;
 
@@ -81,6 +91,26 @@ public abstract class ParquetInputFormat<E> extends FileInputFormat<E> implement
 		this.unsplittable = true;
 	}
 
+	protected java.time.Instant bigIntToTimestamp(byte[] value) {
+		byteBuffer.clear();
+		byteBuffer.put(value);
+		byteBuffer.rewind();
+		long nano = byteBuffer.getLong();
+		long day = byteBuffer.getInt() - JULIAN_EPOCH_OFFSET_DAYS;
+		return Instant.ofEpochSecond(day * SECONDS_IN_DAY + nano / 1_000_000_000, nano % 1_000_000_000);
+	}
+
+	protected java.time.Instant bigIntToTimestamp(org.apache.parquet.io.api.Binary value) {
+		ByteBuffer byteBuffer = value.toByteBuffer().order(ByteOrder.LITTLE_ENDIAN);
+		long nano = byteBuffer.getLong();
+		long day = byteBuffer.getInt() - JULIAN_EPOCH_OFFSET_DAYS;
+		return Instant.ofEpochSecond(day * SECONDS_IN_DAY + nano / 1_000_000_000, nano % 1_000_000_000);
+	}
+
+	protected java.time.Instant microsecsToTimestamp(long microsecs) {
+		return Instant.ofEpochSecond(microsecs / 1_000_000, (microsecs % 1_000_000) * 1000);
+	}
+
 	@Override
 	public Tuple2<Long, Long> getCurrentState() {
 		return new Tuple2<>(this.lastSyncedBlock, this.recordsReadSinceLastSync);
@@ -95,7 +125,7 @@ public abstract class ParquetInputFormat<E> extends FileInputFormat<E> implement
 		ParquetFileReader fileReader = new ParquetFileReader(inputFile, options);
 		MessageType schema = fileReader.getFileMetaData().getSchema();
 		checkSchema(schema);
-		MessageType readSchema = ParquetSchemaConverter.toParquetType(readType);
+		MessageType readSchema = ParquetSchemaConverter.toParquetType(readType, schema);
 		this.parquetRecordReader = new ParquetRecordReader<>(new RowReadSupport(), readSchema, FilterCompat.NOOP);
 		this.parquetRecordReader.initialize(fileReader, configuration);
 		if (this.recordConsumed == null) {
