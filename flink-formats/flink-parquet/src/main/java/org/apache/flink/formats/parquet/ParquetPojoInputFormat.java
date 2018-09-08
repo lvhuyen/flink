@@ -19,6 +19,8 @@
 package org.apache.flink.formats.parquet;
 
 import org.apache.flink.api.common.ExecutionConfig;
+import org.apache.flink.api.common.typeinfo.BasicTypeInfo;
+import org.apache.flink.api.common.typeinfo.SqlTimeTypeInfo;
 import org.apache.flink.api.common.typeinfo.TypeInformation;
 import org.apache.flink.api.common.typeutils.TypeSerializer;
 import org.apache.flink.api.java.typeutils.PojoTypeInfo;
@@ -27,6 +29,7 @@ import org.apache.flink.core.fs.Path;
 import org.apache.flink.types.Row;
 import org.apache.flink.util.Preconditions;
 
+import org.apache.parquet.io.api.Binary;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -93,7 +96,21 @@ public class ParquetPojoInputFormat<E> extends ParquetInputFormat<E> {
 		E result = typeSerializer.createInstance();
 		for (int i = 0; i < row.getArity(); ++i) {
 			try {
-				pojoFields[i].set(result, row.getField(i));
+				if (fieldTypes[i].equals(BasicTypeInfo.STRING_TYPE_INFO)) {
+					pojoFields[i].set(result, ((Binary) row.getField(i)).toStringUsingUTF8());
+				} else if (fieldTypes[i].equals(BasicTypeInfo.DATE_TYPE_INFO)) {
+					pojoFields[i].set(result, new java.util.Date((long) row.getField(i)));
+				} else if (fieldTypes[i].equals(BasicTypeInfo.INSTANT_TYPE_INFO)) {
+					if (row.getField(i) instanceof Binary) {
+						pojoFields[i].set(result, bigIntToTimestamp(((Binary) row.getField(i)).getBytes()));
+					} else {
+						pojoFields[i].set(result, microsecsToTimestamp((long) row.getField(i)));
+					}
+				} else if (fieldTypes[i] instanceof SqlTimeTypeInfo) {
+					pojoFields[i].set(result, new java.sql.Date((int) row.getField(i)));
+				} else {
+					pojoFields[i].set(result, row.getField(i));
+				}
 			} catch (IllegalAccessException e) {
 				throw new RuntimeException(
 					String.format("Parsed value could not be set in POJO field %s", fieldNames[i]));

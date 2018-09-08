@@ -158,7 +158,7 @@ public class RowConverter extends GroupConverter implements ParentDataHolder {
 
 		@Override
 		public void addBinary(Binary value) {
-			parentDataHolder.add(pos, value.toStringUsingUTF8());
+			parentDataHolder.add(pos, value);
 		}
 
 		@Override

@@ -21,12 +21,15 @@ package org.apache.flink.formats.parquet;
 import org.apache.flink.api.common.typeinfo.BasicArrayTypeInfo;
 import org.apache.flink.api.common.typeinfo.BasicTypeInfo;
 import org.apache.flink.api.common.typeinfo.PrimitiveArrayTypeInfo;
+import org.apache.flink.api.common.typeinfo.SqlTimeTypeInfo;
 import org.apache.flink.api.common.typeinfo.TypeInformation;
 import org.apache.flink.api.java.typeutils.MapTypeInfo;
 import org.apache.flink.api.java.typeutils.ObjectArrayTypeInfo;
 import org.apache.flink.api.java.typeutils.RowTypeInfo;
 import org.apache.flink.core.fs.Path;
 import org.apache.flink.types.Row;
+
+import org.apache.parquet.io.api.Binary;
 
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -54,10 +57,22 @@ public class ParquetMapInputFormat extends ParquetInputFormat<Map> {
 	private void convert(Map<String, Object> map, Row row, TypeInformation<?>[] fieldTypes, String[] fieldNames) {
 		for (int i = 0; i < fieldNames.length; i++) {
 			if (row.getField(i) != null) {
-				if (fieldTypes[i] instanceof BasicTypeInfo
+				if (fieldTypes[i].equals(BasicTypeInfo.STRING_TYPE_INFO)) {
+					map.put(fieldNames[i], ((Binary) row.getField(i)).toStringUsingUTF8());
+				} else if (fieldTypes[i].equals(BasicTypeInfo.DATE_TYPE_INFO)) {
+					map.put(fieldNames[i], new java.util.Date((long) row.getField(i)));
+				} else if (fieldTypes[i].equals(BasicTypeInfo.INSTANT_TYPE_INFO)) {
+					if (row.getField(i) instanceof Binary) {
+						map.put(fieldNames[i], bigIntToTimestamp(((Binary) row.getField(i))));
+					} else {
+						map.put(fieldNames[i], microsecsToTimestamp((long) row.getField(i)));
+					}
+				} else if (fieldTypes[i] instanceof BasicTypeInfo
 					|| fieldTypes[i] instanceof PrimitiveArrayTypeInfo
 					|| fieldTypes[i] instanceof BasicArrayTypeInfo) {
-					map.put(fieldNames[i], row.getField(i));
+						map.put(fieldNames[i], row.getField(i));
+				} else if (fieldTypes[i] instanceof SqlTimeTypeInfo) {
+					map.put(fieldNames[i], new java.sql.Date((int) row.getField(i) * MILLIS_IN_DAY));
 				} else if (fieldTypes[i] instanceof RowTypeInfo) {
 					Map<String, Object> nestedRow = new HashMap<>();
 					RowTypeInfo nestedRowTypeInfo = (RowTypeInfo) fieldTypes[i];
