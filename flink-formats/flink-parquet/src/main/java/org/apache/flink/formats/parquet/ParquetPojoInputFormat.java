@@ -95,25 +95,27 @@ public class ParquetPojoInputFormat<E> extends ParquetInputFormat<E> {
 	protected E convert(Row row) {
 		E result = typeSerializer.createInstance();
 		for (int i = 0; i < row.getArity(); ++i) {
-			try {
-				if (fieldTypes[i].equals(BasicTypeInfo.STRING_TYPE_INFO)) {
-					pojoFields[i].set(result, ((Binary) row.getField(i)).toStringUsingUTF8());
-				} else if (fieldTypes[i].equals(BasicTypeInfo.DATE_TYPE_INFO)) {
-					pojoFields[i].set(result, new java.util.Date((long) row.getField(i)));
-				} else if (fieldTypes[i].equals(BasicTypeInfo.INSTANT_TYPE_INFO)) {
-					if (row.getField(i) instanceof Binary) {
-						pojoFields[i].set(result, bigIntToTimestamp(((Binary) row.getField(i)).getBytes()));
+			if (row.getField(i) != null) {
+				try {
+					if (fieldTypes[i].equals(BasicTypeInfo.STRING_TYPE_INFO)) {
+						pojoFields[i].set(result, ((Binary) row.getField(i)).toStringUsingUTF8());
+					} else if (fieldTypes[i].equals(BasicTypeInfo.DATE_TYPE_INFO)) {
+						pojoFields[i].set(result, new java.util.Date((long) row.getField(i)));
+					} else if (fieldTypes[i].equals(BasicTypeInfo.INSTANT_TYPE_INFO)) {
+						if (row.getField(i) instanceof Binary) {
+							pojoFields[i].set(result, bigIntToTimestamp(((Binary) row.getField(i))));
+						} else {
+							pojoFields[i].set(result, microsecsToTimestamp((long) row.getField(i)));
+						}
+					} else if (fieldTypes[i] instanceof SqlTimeTypeInfo) {
+						pojoFields[i].set(result, new java.sql.Date((int) row.getField(i)));
 					} else {
-						pojoFields[i].set(result, microsecsToTimestamp((long) row.getField(i)));
+						pojoFields[i].set(result, row.getField(i));
 					}
-				} else if (fieldTypes[i] instanceof SqlTimeTypeInfo) {
-					pojoFields[i].set(result, new java.sql.Date((int) row.getField(i)));
-				} else {
-					pojoFields[i].set(result, row.getField(i));
+				} catch (IllegalAccessException e) {
+					throw new RuntimeException(
+						String.format("Parsed value could not be set in POJO field %s", fieldNames[i]));
 				}
-			} catch (IllegalAccessException e) {
-				throw new RuntimeException(
-					String.format("Parsed value could not be set in POJO field %s", fieldNames[i]));
 			}
 		}
 
