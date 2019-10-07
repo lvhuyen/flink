@@ -26,6 +26,7 @@ import org.apache.flink.api.common.state.ListStateDescriptor;
 import org.apache.flink.api.common.typeutils.base.LongSerializer;
 import org.apache.flink.api.common.typeutils.base.MapSerializer;
 import org.apache.flink.api.common.typeutils.base.StringSerializer;
+import org.apache.flink.api.java.tuple.Tuple2;
 import org.apache.flink.configuration.Configuration;
 import org.apache.flink.core.fs.FileInputSplit;
 import org.apache.flink.core.fs.FileStatus;
@@ -119,6 +120,17 @@ public class ContinuousFileMonitoringFunction<OUT>
 	 *  to maxProcessedTime in the form of a Map&lt;filePath, lastModificationTime&gt;. */
 	private volatile Map<String, Long> processedFiles;
 
+	/** The {@link FileInputFormat} to be read. */
+	private final DirectoriesPartitioner directoriesPartitioner;
+
+	private long maxScannedDirectoryTimestamp;
+	private transient long nearestFutureDirectoryTimestamp;
+
+	private long directoryScanWindowBegin;
+	private long directoryScanWindowEnd;
+	private long prevDirectoryScanWindowEnd;
+	// End of directories-partitioner related params
+
 	private transient Object checkpointLock;
 
 	private volatile boolean isRunning = true;
@@ -126,6 +138,8 @@ public class ContinuousFileMonitoringFunction<OUT>
 	private transient ListState<Long> checkpointedState;
 
 	private transient ListState<Map<String, Long>> checkpointedStateProcessedFilesList;
+
+	private transient ListState<Long> checkpointedStateDirectoryWatermark;
 
 	public ContinuousFileMonitoringFunction(
 		FileInputFormat<OUT> format,
@@ -169,6 +183,17 @@ public class ContinuousFileMonitoringFunction<OUT>
 		this.globalModificationTime = Long.MIN_VALUE;
 		this.maxProcessedTime = Long.MIN_VALUE + this.readConsistencyOffset;
 		this.processedFiles = new HashMap<>();
+
+		if (format instanceof DirectoriesPartitioner) {
+			directoriesPartitioner = (DirectoriesPartitioner)format;
+		} else {
+			directoriesPartitioner = null;
+		}
+		this.maxScannedDirectoryTimestamp = Long.MIN_VALUE;
+		this.nearestFutureDirectoryTimestamp = Long.MIN_VALUE;
+		this.prevDirectoryScanWindowEnd = Long.MIN_VALUE;
+		this.directoryScanWindowEnd = Long.MIN_VALUE;
+		this.directoryScanWindowBegin = Long.MIN_VALUE;
 	}
 
 	@VisibleForTesting
@@ -204,6 +229,12 @@ public class ContinuousFileMonitoringFunction<OUT>
 				new MapSerializer<>(StringSerializer.INSTANCE, LongSerializer.INSTANCE)
 			)
 		);
+		this.checkpointedStateDirectoryWatermark = context.getOperatorStateStore().getListState(
+			new ListStateDescriptor<>(
+				"file-monitoring-state-max-scanned-dir-time",
+				LongSerializer.INSTANCE
+			)
+		);
 
 		if (context.isRestored()) {
 			LOG.info("Restoring state for the {}.", getClass().getSimpleName());
@@ -215,6 +246,10 @@ public class ContinuousFileMonitoringFunction<OUT>
 			List<Map<String, Long>> retrievedStates2 = new ArrayList<>();
 			for (Map<String, Long> entry : this.checkpointedStateProcessedFilesList.get()) {
 				retrievedStates2.add(entry);
+			}
+			List<Long> retrievedStatesDirWatermark = new ArrayList<>();
+			for (Long entry : this.checkpointedStateDirectoryWatermark.get()) {
+				retrievedStatesDirWatermark.add(entry);
 			}
 
 			// given that the parallelism of the function is 1, we can only have 1 or 0 retrieved items.
@@ -256,10 +291,19 @@ public class ContinuousFileMonitoringFunction<OUT>
 				if (this.maxProcessedTime < Long.MIN_VALUE + this.readConsistencyOffset) {
 					this.maxProcessedTime = Long.MIN_VALUE + this.readConsistencyOffset;
 				}
-			}
 
-		} else {
-			LOG.info("No state to restore for the {}.", getClass().getSimpleName());
+				if (retrievedStatesDirWatermark.size() == 1 && maxScannedDirectoryTimestamp != Long.MIN_VALUE) {
+					throw new IllegalArgumentException(
+						"The " + getClass().getSimpleName() + " has already restored from a previous Flink version.");
+				} else if (retrievedStatesDirWatermark.size() == 1) {
+					maxScannedDirectoryTimestamp = retrievedStatesDirWatermark.get(0);
+					directoryScanWindowEnd = maxScannedDirectoryTimestamp;
+					calculateNextDirScanWindow(0);
+				}
+
+			} else {
+				LOG.info("No state to restore for the {}.", getClass().getSimpleName());
+			}
 		}
 	}
 
@@ -286,9 +330,7 @@ public class ContinuousFileMonitoringFunction<OUT>
 		switch (watchType) {
 			case PROCESS_CONTINUOUSLY:
 				while (isRunning) {
-					synchronized (checkpointLock) {
-						monitorDirAndForwardSplits(fileSystem, context);
-					}
+					monitorDirAndForwardSplits(fileSystem, context);
 					Thread.sleep(interval);
 				}
 
@@ -322,29 +364,34 @@ public class ContinuousFileMonitoringFunction<OUT>
 											SourceContext<TimestampedFileInputSplit> context) throws IOException {
 		assert (Thread.holdsLock(checkpointLock));
 
-		Map<Path, FileStatus> eligibleFiles = listEligibleFiles(fs, new Path(path));
-		Map<Long, List<TimestampedFileInputSplit>> splitsSortedByModTime = getInputSplitsSortedByModTime(eligibleFiles);
+		Map<Path, FileStatus> eligibleFiles = listEligibleFiles(fs, new Path(path), false);
 
-		for (Map.Entry<Long, List<TimestampedFileInputSplit>> splits: splitsSortedByModTime.entrySet()) {
-			long modificationTime = splits.getKey();
-			for (TimestampedFileInputSplit split: splits.getValue()) {
-				LOG.info("Forwarding split: " + split);
-				context.collect(split);
-			}
-			// update the global modification time
-			maxProcessedTime = Math.max(maxProcessedTime, modificationTime);
-		}
-		// Populate processed files.
-		// This check is to ensure that globalModificationTime will not go backward
-		// even if readConsistencyOffset is changed to a large value after a restore from checkpoint,
-		// so  files would be processed twice
-		globalModificationTime = Math.max(maxProcessedTime - readConsistencyOffset, globalModificationTime);
+		synchronized (checkpointLock) {
+			Map<Long, List<TimestampedFileInputSplit>> splitsSortedByModTime = getInputSplitsSortedByModTime(eligibleFiles);
 
-		processedFiles.entrySet().removeIf(item -> item.getValue() <= globalModificationTime);
-		for (FileStatus fileStatus: eligibleFiles.values()) {
-			if (fileStatus.getModificationTime() > globalModificationTime) {
-				processedFiles.put(fileStatus.getPath().getPath(), fileStatus.getModificationTime());
+			for (Map.Entry<Long, List<TimestampedFileInputSplit>> splits: splitsSortedByModTime.entrySet()) {
+				long modificationTime = splits.getKey();
+				for (TimestampedFileInputSplit split: splits.getValue()) {
+					LOG.info("Forwarding split: " + split);
+					context.collect(split);
+				}
+				// update the global modification time
+				maxProcessedTime = Math.max(maxProcessedTime, modificationTime);
 			}
+			// Populate processed files.
+			// This check is to ensure that globalModificationTime will not go backward
+			// even if readConsistencyOffset is changed to a large value after a restore from checkpoint,
+			// so  files would be processed twice
+			globalModificationTime = Math.max(maxProcessedTime - readConsistencyOffset, globalModificationTime);
+
+			processedFiles.entrySet().removeIf(item -> item.getValue() <= globalModificationTime);
+			for (FileStatus fileStatus: eligibleFiles.values()) {
+				if (fileStatus.getModificationTime() > globalModificationTime) {
+					processedFiles.put(fileStatus.getPath().getPath(), fileStatus.getModificationTime());
+				}
+			}
+
+			this.calculateNextDirScanWindow(eligibleFiles.size());
 		}
 	}
 
@@ -384,7 +431,8 @@ public class ContinuousFileMonitoringFunction<OUT>
 	 * Returns the paths of the files not yet processed.
 	 * @param fileSystem The filesystem where the monitored directory resides.
 	 */
-	private Map<Path, FileStatus> listEligibleFiles(FileSystem fileSystem, Path path) throws IOException {
+	private Map<Path, FileStatus> listEligibleFiles(FileSystem fileSystem, Path path, boolean firstScan)
+		throws IOException {
 
 		final FileStatus[] statuses;
 		try {
@@ -405,11 +453,14 @@ public class ContinuousFileMonitoringFunction<OUT>
 				if (!status.isDir()) {
 					Path filePath = status.getPath();
 					long modificationTime = status.getModificationTime();
-					if (!shouldIgnore(filePath, modificationTime)) {
+					if (firstScan || !shouldIgnore(filePath, modificationTime)) {
 						files.put(filePath, status);
 					}
 				} else if (format.getNestedFileEnumeration() && format.acceptFile(status)){
-					files.putAll(listEligibleFiles(fileSystem, status.getPath()));
+					int scanEligibility = this.shouldScanDir(status);
+					if (scanEligibility > 0) {
+						files.putAll(listEligibleFiles(fileSystem, status.getPath(), scanEligibility == 2));
+					}
 				}
 			}
 			return files;
@@ -435,6 +486,71 @@ public class ContinuousFileMonitoringFunction<OUT>
 				filePath, modificationTime, globalModificationTime, maxProcessedTime);
 		}
 		return shouldIgnore;
+	}
+
+
+	public interface DirectoriesPartitioner {
+		Tuple2<Long, Long> getDirectoryTimeInfo(FileStatus directory);
+		int getForwardRange();
+		int getRescanRange();
+	}
+
+	/**
+	 * Check eligibily to scan of a sub directory.
+	 * The method may be overridden, for e.g. to delay the scan of this sub-directory.
+	 *
+	 * @param fileStatus The file status to check.
+	 * @return
+	 *      2: add all valid files currently in this directory, no matter what the timestamp is
+	 *      1: already scanned, but should scan again
+	 *      0: should not be scanned
+	 *      -1: already scanned, to not scan again
+	 *      -2: have not scanned, but not to scan now
+	 */
+	protected int shouldScanDir(FileStatus fileStatus) {
+		if (directoriesPartitioner == null) {
+			return 1;
+		}
+		Tuple2<Long, Long> dirInfo = directoriesPartitioner.getDirectoryTimeInfo(fileStatus);
+		Preconditions.checkState(dirInfo.f0 <= dirInfo.f1, "Partition-end must NOT be ahead of parttion-begin");
+
+		// partition is in the future, so set `nearestFutureTimestamp` to the mininum of these,
+		// and return -2 so this directory won't be scanned
+		if (dirInfo.f0 >= directoryScanWindowEnd) {
+			if (nearestFutureDirectoryTimestamp < directoryScanWindowEnd || dirInfo.f0 < nearestFutureDirectoryTimestamp) {
+				nearestFutureDirectoryTimestamp = dirInfo.f0;
+			}
+			return -2;
+		}
+		// partition is in the past, return -1 so this directory won't be scanned
+		if (dirInfo.f1 <= directoryScanWindowBegin) {
+			return -1;
+		}
+
+		// set `maxCurrentTimestamp`
+		if (maxScannedDirectoryTimestamp < dirInfo.f0) {
+			maxScannedDirectoryTimestamp = dirInfo.f0;
+		}
+
+		return ((dirInfo.f0 >= prevDirectoryScanWindowEnd) ? 2 : 1);
+	}
+
+	private long calculateNextDirScanWindow(int previousScanCount) {
+		if (directoriesPartitioner == null) {
+			return Long.MIN_VALUE;
+		}
+
+		prevDirectoryScanWindowEnd = directoryScanWindowEnd;
+		directoryScanWindowBegin = (maxScannedDirectoryTimestamp > Long.MIN_VALUE + directoriesPartitioner.getRescanRange()) ?
+			(maxScannedDirectoryTimestamp - directoriesPartitioner.getRescanRange()) : Long.MIN_VALUE;
+		long temp = Math.max(nearestFutureDirectoryTimestamp, maxScannedDirectoryTimestamp);
+		directoryScanWindowEnd = (temp < Long.MAX_VALUE - directoriesPartitioner.getForwardRange()) ?
+			(temp + directoriesPartitioner.getForwardRange()) : Long.MAX_VALUE;
+
+		if (LOG.isDebugEnabled()) {
+			LOG.debug("(prevWindowEnd, windowBegin, windowEnd): ({} {} {})", prevDirectoryScanWindowEnd, directoryScanWindowBegin, directoryScanWindowEnd);
+		}
+		return maxScannedDirectoryTimestamp;
 	}
 
 	@Override
@@ -481,6 +597,8 @@ public class ContinuousFileMonitoringFunction<OUT>
 		this.checkpointedState.add(this.globalModificationTime);
 		this.checkpointedStateProcessedFilesList.clear();
 		this.checkpointedStateProcessedFilesList.add(this.processedFiles);
+		this.checkpointedStateDirectoryWatermark.clear();
+		this.checkpointedStateDirectoryWatermark.add(this.maxScannedDirectoryTimestamp);
 
 		if (LOG.isDebugEnabled()) {
 			LOG.debug("{} checkpointed globalModificationTime {}, and {} files.",
