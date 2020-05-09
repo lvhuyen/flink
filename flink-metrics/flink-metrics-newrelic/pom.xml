@@ -132,6 +132,7 @@ under the License.
 							<artifactSet>
 								<includes>
 									<include>com.newrelic.telemetry:*</include>
+									<include>com.squareup.ok*:*</include>
 								</includes>
 							</artifactSet>
 						</configuration>
