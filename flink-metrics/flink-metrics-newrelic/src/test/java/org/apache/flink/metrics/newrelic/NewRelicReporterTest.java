@@ -21,7 +21,7 @@ package org.apache.flink.metrics.newrelic;
 import org.apache.flink.util.TestLogger;
 
 /**
- * Tests for the JMXReporter.
+ * Tests for the NewRelicReporter.
  */
 public class NewRelicReporterTest extends TestLogger {
 }
