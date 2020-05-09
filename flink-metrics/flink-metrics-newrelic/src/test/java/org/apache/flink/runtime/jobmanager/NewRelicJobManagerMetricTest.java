@@ -27,7 +27,7 @@ import org.apache.flink.configuration.ConfigConstants;
 import org.apache.flink.configuration.Configuration;
 import org.apache.flink.configuration.MetricOptions;
 import org.apache.flink.core.testutils.OneShotLatch;
-import org.apache.flink.metrics.jmx.JMXReporter;
+import org.apache.flink.metrics.newrelic.FlinkNewRelicReporter;
 import org.apache.flink.runtime.checkpoint.CheckpointRetentionPolicy;
 import org.apache.flink.runtime.concurrent.FutureUtils;
 import org.apache.flink.runtime.execution.Environment;
@@ -60,7 +60,7 @@ import static org.junit.Assert.assertEquals;
 /**
  * Tests to verify JMX reporter functionality on the JobManager.
  */
-public class JMXJobManagerMetricTest extends TestLogger {
+public class NewRelicJobManagerMetricTest extends TestLogger {
 
 	@ClassRule
 	public static final MiniClusterWithClientResource MINI_CLUSTER_RESOURCE = new MiniClusterWithClientResource(
@@ -73,7 +73,7 @@ public class JMXJobManagerMetricTest extends TestLogger {
 	private static Configuration getConfiguration() {
 		Configuration flinkConfiguration = new Configuration();
 
-		flinkConfiguration.setString(ConfigConstants.METRICS_REPORTER_PREFIX + "test." + ConfigConstants.METRICS_REPORTER_CLASS_SUFFIX, JMXReporter.class.getName());
+		flinkConfiguration.setString(ConfigConstants.METRICS_REPORTER_PREFIX + "test." + ConfigConstants.METRICS_REPORTER_CLASS_SUFFIX, FlinkNewRelicReporter.class.getName());
 		flinkConfiguration.setString(MetricOptions.SCOPE_NAMING_JM_JOB, "jobmanager.<job_name>");
 
 		return flinkConfiguration;
