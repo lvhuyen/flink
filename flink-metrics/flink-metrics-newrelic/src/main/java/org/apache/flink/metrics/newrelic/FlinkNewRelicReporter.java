@@ -18,6 +18,8 @@
 
 package org.apache.flink.metrics.newrelic;
 
+import java.time.Duration;
+
 import com.codahale.metrics.ScheduledReporter;
 import com.codahale.metrics.newrelic.NewRelicReporter;
 import com.newrelic.telemetry.Attributes;
@@ -30,9 +32,6 @@ import org.apache.flink.metrics.MetricConfig;
 import org.apache.flink.metrics.MetricGroup;
 import org.apache.flink.metrics.reporter.InstantiateViaFactory;
 import org.apache.flink.metrics.reporter.MetricReporter;
-
-import java.time.Duration;
-
 
 /**
  * {@link MetricReporter} that exports {@link Metric Metrics} to NewRelic.
