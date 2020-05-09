@@ -131,7 +131,7 @@ under the License.
 						<configuration>
 							<artifactSet>
 								<includes>
-									<include>com.newrelic:*</include>
+									<include>com.newrelic.telemetry:*</include>
 								</includes>
 							</artifactSet>
 						</configuration>
