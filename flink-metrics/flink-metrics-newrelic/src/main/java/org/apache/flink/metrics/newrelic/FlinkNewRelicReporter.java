@@ -18,11 +18,22 @@
 
 package org.apache.flink.metrics.newrelic;
 
+import com.codahale.metrics.ScheduledReporter;
+import com.codahale.metrics.newrelic.NewRelicReporter;
+
+import com.newrelic.telemetry.Attributes;
+import com.newrelic.telemetry.SimpleMetricBatchSender;
+import com.newrelic.telemetry.metrics.MetricBatchSender;
+
+import org.apache.flink.configuration.ConfigConstants;
+import org.apache.flink.dropwizard.ScheduledDropwizardReporter;
 import org.apache.flink.metrics.Metric;
 import org.apache.flink.metrics.MetricConfig;
 import org.apache.flink.metrics.MetricGroup;
 import org.apache.flink.metrics.reporter.InstantiateViaFactory;
 import org.apache.flink.metrics.reporter.MetricReporter;
+
+import java.time.Duration;
 
 /**
  * {@link MetricReporter} that exports {@link Metric Metrics} to NewRelic.
