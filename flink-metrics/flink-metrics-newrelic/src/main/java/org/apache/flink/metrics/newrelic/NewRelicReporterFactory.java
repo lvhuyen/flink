@@ -22,7 +22,7 @@ import org.apache.flink.metrics.reporter.MetricReporterFactory;
 import java.util.Properties;
 
 /**
- * {@link MetricReporterFactory} for {@link JMXReporter}.
+ * {@link MetricReporterFactory} for {@link FlinkNewRelicReporter}.
  */
 public class NewRelicReporterFactory implements MetricReporterFactory {
 	@Override
