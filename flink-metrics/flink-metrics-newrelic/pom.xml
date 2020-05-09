@@ -29,8 +29,8 @@ under the License.
 		<relativePath>..</relativePath>
 	</parent>
 
-	<artifactId>flink-metrics-jmx_${scala.binary.version}</artifactId>
-	<name>flink-metrics-jmx</name>
+	<artifactId>flink-metrics-newrelic_${scala.binary.version}</artifactId>
+	<name>flink-metrics-newrelic</name>
 
 	<dependencies>
 		<dependency>
