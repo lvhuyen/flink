@@ -43,6 +43,13 @@ import java.time.Duration;
 @InstantiateViaFactory(factoryClassName = "org.apache.flink.metrics.newrelic.NewRelicReporterFactory")
 public class FlinkNewRelicReporter extends ScheduledDropwizardReporter {
 	protected String[] excludedVariables;
+
+	/**
+	 *
+	 * MetricBatchSender metricBatchSender = SimpleMetricBatchSender
+	 *	.builder(apiKey, Duration.ofSeconds(5))
+	 *	.build();
+	 */
 	@Override
 	public ScheduledReporter getReporter(MetricConfig config) {
 		excludedVariables = config.getString(ConfigConstants.METRICS_REPORTER_EXCLUDED_VARIABLES, "").split(";");
@@ -50,8 +57,8 @@ public class FlinkNewRelicReporter extends ScheduledDropwizardReporter {
 		String apiKey = config.getString("apiKey", null);
 		String appName = config.getString("appName", null);
 
-		MetricBatchSender metricBatchSender = SimpleMetricBatchSender
-			.builder(apiKey, Duration.ofSeconds(5))
+		MetricBatchSender metricBatchSender = TempBatchSender
+			.builder(apiKey, Duration.ofSeconds(5), this.log)
 			.build();
 
 		Attributes commonAttributes = new Attributes()
