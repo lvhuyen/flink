@@ -62,6 +62,8 @@ public class FlinkNewRelicReporter extends ScheduledDropwizardReporter {
 		Attributes commonAttributes = new Attributes()
 			.put("appName", appName);
 
+		this.log.info("Initiating NewRelic Reporter");
+
 		NewRelicReporter res = NewRelicReporter.build(registry, metricBatchSender)
 			.commonAttributes(commonAttributes)
 			.build();

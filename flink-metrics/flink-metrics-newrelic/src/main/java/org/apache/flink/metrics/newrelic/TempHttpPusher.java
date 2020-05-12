@@ -17,6 +17,7 @@ public class TempHttpPusher extends OkHttpPoster {
 	Logger logger = null;
 	public TempHttpPusher(Duration callTimeout, Logger logger) {
 		super(callTimeout);
+		logger.info("Creating TempHttpPoster");
 		this.logger = logger;
 	}
 

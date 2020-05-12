@@ -13,6 +13,7 @@ import java.time.Duration;
  */
 public class TempBatchSender extends SimpleMetricBatchSender {
 	public static MetricBatchSenderBuilder builder(String apiKey, Duration callTimeout, Logger logger) {
+		logger.info("Creating Temp Batch Sender");
 		OkHttpPoster okHttpPoster = new TempHttpPusher(callTimeout, logger);
 		return MetricBatchSender.builder().apiKey(apiKey).httpPoster(okHttpPoster);
 	}
