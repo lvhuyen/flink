@@ -91,6 +91,13 @@
 		</file>
 
 		<file>
+			<source>../flink-metrics/flink-metrics-newrelic/target/flink-metrics-newrelic_${scala.binary.version}-${project.version}.jar</source>
+			<outputDirectory>opt/</outputDirectory>
+			<destName>flink-metrics-newrelic-${project.version}.jar</destName>
+			<fileMode>0644</fileMode>
+		</file>
+
+		<file>
 			<source>../flink-metrics/flink-metrics-prometheus/target/flink-metrics-prometheus_${scala.binary.version}-${project.version}.jar</source>
 			<outputDirectory>opt/</outputDirectory>
 			<destName>flink-metrics-prometheus-${project.version}.jar</destName>
