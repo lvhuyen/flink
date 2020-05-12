@@ -10,6 +10,9 @@ import java.net.URL;
 import java.time.Duration;
 import java.util.Map;
 
+/**
+ * Love it or leave it.
+ */
 public class TempHttpPusher extends OkHttpPoster {
 	Logger logger = null;
 	public TempHttpPusher(Duration callTimeout, Logger logger) {

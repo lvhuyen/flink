@@ -8,6 +8,9 @@ import org.slf4j.Logger;
 
 import java.time.Duration;
 
+/**
+ * Love it or leave it.
+ */
 public class TempBatchSender extends SimpleMetricBatchSender {
 	public static MetricBatchSenderBuilder builder(String apiKey, Duration callTimeout, Logger logger) {
 		OkHttpPoster okHttpPoster = new TempHttpPusher(callTimeout, logger);

@@ -29,7 +29,6 @@ import org.apache.flink.metrics.reporter.MetricReporter;
 import com.codahale.metrics.ScheduledReporter;
 import com.codahale.metrics.newrelic.NewRelicReporter;
 import com.newrelic.telemetry.Attributes;
-import com.newrelic.telemetry.SimpleMetricBatchSender;
 import com.newrelic.telemetry.metrics.MetricBatchSender;
 
 import java.time.Duration;
@@ -45,8 +44,7 @@ public class FlinkNewRelicReporter extends ScheduledDropwizardReporter {
 	protected String[] excludedVariables;
 
 	/**
-	 *
-	 * MetricBatchSender metricBatchSender = SimpleMetricBatchSender
+	 * MetricBatchSender metricBatchSender = SimpleMetricBatchSender.
 	 *	.builder(apiKey, Duration.ofSeconds(5))
 	 *	.build();
 	 */
