@@ -29,9 +29,11 @@ import org.apache.flink.metrics.reporter.MetricReporter;
 import com.codahale.metrics.ScheduledReporter;
 import com.codahale.metrics.newrelic.NewRelicReporter;
 import com.newrelic.telemetry.Attributes;
+import com.newrelic.telemetry.SimpleMetricBatchSender;
 import com.newrelic.telemetry.metrics.MetricBatchSender;
 
 import java.time.Duration;
+import java.util.Arrays;
 
 /**
  * {@link MetricReporter} that exports {@link Metric Metrics} to NewRelic.
@@ -43,26 +45,22 @@ import java.time.Duration;
 public class FlinkNewRelicReporter extends ScheduledDropwizardReporter {
 	protected String[] excludedVariables;
 
-	/**
-	 * MetricBatchSender metricBatchSender = SimpleMetricBatchSender.
-	 *	.builder(apiKey, Duration.ofSeconds(5))
-	 *	.build();
-	 */
 	@Override
 	public ScheduledReporter getReporter(MetricConfig config) {
-		excludedVariables = config.getString(ConfigConstants.METRICS_REPORTER_EXCLUDED_VARIABLES, "").split(";");
+		excludedVariables = Arrays.stream(config
+			.getString(ConfigConstants.METRICS_REPORTER_EXCLUDED_VARIABLES, "")
+			.split(";")
+		).map(String::trim).filter(s -> !(s.equals(""))).toArray(String[]::new);
 
 		String apiKey = config.getString("apiKey", null);
 		String appName = config.getString("appName", null);
 
-		MetricBatchSender metricBatchSender = TempBatchSender
-			.builder(apiKey, Duration.ofSeconds(5), this.log)
+		MetricBatchSender metricBatchSender = SimpleMetricBatchSender
+			.builder(apiKey, Duration.ofSeconds(5))
 			.build();
 
 		Attributes commonAttributes = new Attributes()
 			.put("appName", appName);
-
-		this.log.info("Initiating NewRelic Reporter");
 
 		NewRelicReporter res = NewRelicReporter.build(registry, metricBatchSender)
 			.commonAttributes(commonAttributes)
