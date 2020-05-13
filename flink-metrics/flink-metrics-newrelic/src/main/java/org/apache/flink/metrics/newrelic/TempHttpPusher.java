@@ -30,7 +30,7 @@ public class TempHttpPusher extends OkHttpPoster {
 	public HttpResponse post(URL url, Map<String, String> headers, byte[] body, String mediaType)
 		throws IOException {
 		logger.info("Pushing metrics to NewRelic " + url.toString() + headers.toString());
-		return super.post(url, headers, body, mediaType);
+		throw new IOException("HTTPPost has been called");
 	}
 
 }
